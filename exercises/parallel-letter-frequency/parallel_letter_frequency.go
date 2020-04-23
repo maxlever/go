@@ -1,6 +1,6 @@
 package letter
 
-import "sync"
+import "fmt"
 
 // FreqMap records the frequency of each rune in a given text.
 type FreqMap map[rune]int
@@ -15,30 +15,45 @@ func Frequency(s string) FreqMap {
 	return m
 }
 
-// SyncFrequency counts the frequency of each rune in a given text
-// and mutates the given sync.Map
-// sideeffect: decrements given wait group
-func SyncFrequency(str string, waitGroup *sync.WaitGroup, m *sync.Map) {
-	for _, letter := range str {
-		oldValue, _ := m.LoadOrStore(letter, 0)
-		m.Store(letter, oldValue.(int)+1)
-	}
-	waitGroup.Done()
-}
-
 // ConcurrentFrequency gets the total frequency of runes in the given strings
 func ConcurrentFrequency(strings []string) FreqMap {
+	doneProducing := make(chan bool)
+	doneConsuming := make(chan bool)
+	letters := make(chan rune)
 	endMap := make(FreqMap)
-	concurrentMap := sync.Map{}
-	waitGroup := sync.WaitGroup{}
-	for _, str := range strings {
-		waitGroup.Add(1)
-		go SyncFrequency(str, &waitGroup, &concurrentMap)
-	}
-	waitGroup.Wait()
-	concurrentMap.Range(func(k interface{}, v interface{}) bool {
-		endMap[k.(rune)] = v.(int)
-		return true
-	})
+
+	go func() {
+		for i, str := range strings {
+			fmt.Println("started processing string", i)
+			for _, letter := range str {
+				fmt.Println("sending letter", letter)
+				letters <- letter
+			}
+			if i == len(strings)-1 {
+				fmt.Println("finished producing")
+				doneProducing <- true
+			} else {
+				fmt.Println("finished processing string", i)
+			}
+		}
+	}()
+
+	<-doneProducing
+	fmt.Println("finished producing letters")
+
+	go func() {
+		for {
+			letter, more := <-letters
+			if more {
+				fmt.Println("consuming letter", letter)
+				endMap[letter]++
+			} else {
+				fmt.Println("consumed all letters")
+				doneConsuming <- true
+			}
+		}
+	}()
+	<-doneConsuming
 	return endMap
+
 }
